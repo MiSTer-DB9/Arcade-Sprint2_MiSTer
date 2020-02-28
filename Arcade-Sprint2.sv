@@ -68,12 +68,21 @@ module emu
 	// 1 - D-/TX
 	// 2..6 - USR2..USR6
 	// Set USER_OUT to 1 to read from USER_IN.
-	input   [6:0] USER_IN,
-	output  [6:0] USER_OUT
+	output	USER_OSD,
+	output	USER_MODE,
+	input	[7:0] USER_IN,
+	output	[7:0] USER_OUT
 );
 
 assign VGA_F1    = 0;
-assign USER_OUT  = '1;
+
+wire   joy_split, joy_mdsel;
+wire   [5:0] joy_in = {USER_IN[6],USER_IN[3],USER_IN[5],USER_IN[7],USER_IN[1],USER_IN[2]};
+assign USER_OUT  = |status[31:30] ? {3'b111,joy_split,3'b111,joy_mdsel} : '1;
+assign USER_MODE = |status[31:30] ;
+assign USER_OSD  = joydb9md_1[7] & joydb9md_1[5];
+
+
 assign LED_USER  = ioctl_download;
 assign LED_DISK  = lamp2;
 assign LED_POWER = lamp1;
@@ -87,14 +96,16 @@ localparam CONF_STR = {
 	"A.SPRINT2;;",
 	"H0O1,Aspect Ratio,Original,Wide;",
 	"O35,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",  
-	"-;",
+"-;",
+	"OUV,Serial SNAC DB9MD,Off,1 Player,2 Players;",
+"-;",
 	"O8,Oil Slicks,On,Off;",
 	"O9,Cycle tracks on demo,On,Off;",
 	"OA,Extended Play,extended,normal;",
 	"OBC,Game time,150 Sec,120 Sec,90 Sec,60 Sec;",
 	"OD,Test,Off,On;",
 	"OE,Color,Off,On;",		
-	"-;",
+"-;",
 	"R0,Reset;",
 	"J1,Gas,GearUp,GearDown,Next Track,Start 1P,Start 2P,Coin;",
 	"jn,A,R,L,X,Start,Select,X;",
@@ -116,9 +127,51 @@ wire        direct_video;
 wire [21:0] gamma_bus;
 wire [10:0] ps2_key;
 
-wire [15:0] joystick_0, joystick_1;
+wire [15:0] joystick_0_USB, joystick_1_USB;
 wire [15:0] joy0 =  joystick_0;
 wire [15:0] joy1 =  joystick_1;
+
+wire [15:0] joystick_0 = |status[31:30] ? {
+	joydb9md_1[8] | (joydb9md_1[7] & joydb9md_1[4]),// Coin -> 10 *  Mode or Start + B
+	joydb9md_1[11],// _start_2	-> 9 * Z (dummy)
+	joydb9md_1[7], // _start_1	-> 8 * Start
+	joydb9md_1[9], // btn_fireD	-> 7 * X
+	joydb9md_1[5], // btn_fireC	-> 6 * C
+	joydb9md_1[4], // btn_fireB	-> 5 * B
+	joydb9md_1[6], // btn_fireA	-> 4 * A
+	joydb9md_1[3], // btn_up	-> 3 * U
+	joydb9md_1[2], // btn_down	-> 2 * D
+	joydb9md_1[1], // btn_left	-> 1 * L
+	joydb9md_1[0], // btn_righ	-> 0 * R 
+	} 
+	: joystick_0_USB;
+
+wire [15:0] joystick_1 =  status[31]    ? {
+	joydb9md_2[8] | (joydb9md_2[7] & joydb9md_2[4]),// Coin -> 10 *  Mode or Start + B
+	joydb9md_2[7], // _start_2	-> 9 * Start
+	joydb9md_2[11],// _start_1	-> 8 (dummy)
+	joydb9md_2[9], // btn_fireD	-> 7 * X
+	joydb9md_2[5], // btn_fireC	-> 6 * C
+	joydb9md_2[4], // btn_fireB	-> 5 * B
+	joydb9md_2[6], // btn_fireA	-> 4 * A
+	joydb9md_2[3], // btn_up	-> 3 * U
+	joydb9md_2[2], // btn_down	-> 2 * D
+	joydb9md_2[1], // btn_left	-> 1 * L
+	joydb9md_2[0], // btn_right	-> 0 * R 
+	} 
+	: status[30] ? joystick_0_USB : joystick_1_USB;
+
+
+reg [15:0] joydb9md_1,joydb9md_2;
+joy_db9md joy_db9md
+(
+  .clk       ( clk_sys    ), //35-50MHz
+  .joy_split ( joy_split  ),
+  .joy_mdsel ( joy_mdsel  ),
+  .joy_in    ( joy_in     ),
+  .joystick1 ( joydb9md_1 ),
+  .joystick2 ( joydb9md_2 )	  
+);
 
 
 hps_io #(.STRLEN(($size(CONF_STR)>>3) )) hps_io
@@ -140,9 +193,10 @@ hps_io #(.STRLEN(($size(CONF_STR)>>3) )) hps_io
 	.ioctl_addr(ioctl_addr),
 	.ioctl_dout(ioctl_data),
 	
-	.joystick_0(joystick_0),
-	.joystick_1(joystick_1),
-	.ps2_key(ps2_key)
+	.joystick_0(joystick_0_USB),
+	.joystick_1(joystick_1_USB),
+	.joy_raw({joydb9md_1[4],joydb9md_1[6],joydb9md_1[3:0]}),
+.ps2_key(ps2_key)
 );
 
 
